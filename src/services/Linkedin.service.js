@@ -55,8 +55,6 @@ class LinkedInService {
         "https://api.linkedin.com/v2/me?projection=(id,firstName,lastName,profilePicture(displayImage~:playableStreams))&oauth2_access_token=" +
         accessToken;
       const response = await this.sendGetRequest(url);
-      console.log("TACHALA");
-      console.log(response.data);
       return response.data;
     } catch (error) {
       console.error(error);

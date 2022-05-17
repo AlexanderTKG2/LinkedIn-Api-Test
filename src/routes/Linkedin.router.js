@@ -23,7 +23,6 @@ router.get("/callback", async (req, res) => {
     if (!code) {
       res.status(400).json({ error: "No request code found" });
     }
-    console.log("code: " + code);
     const data = await linkedInService.getAccessToken(code);
     if (!data) {
       res.status(400).json({ error: "No access TOKEN found" });
