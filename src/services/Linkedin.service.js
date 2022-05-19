@@ -67,8 +67,42 @@ class LinkedInService {
       const url =
         "https://api.linkedin.com/v2/me?oauth2_access_token=" + accessToken;
       const response = await this.sendGetRequest(url);
-      console.log(response);
-      return response;
+      return response.data.id;
+    } catch (error) {
+      console.error(error);
+      throw error;
+    }
+  }
+
+  async linkedinTextPost(
+    accessToken,
+    accountId,
+    postText,
+    visibility = "PUBLIC"
+  ) {
+    try {
+      const postUrl =
+        "https://api.linkedin.com/v2/ugcPosts?oauth2_access_token=" +
+        accessToken;
+      const requestPayload = {
+        author: "urn:li:person:" + accountId,
+        lifecycleState: "PUBLISHED",
+        specificContent: {
+          "com.linkedin.ugc.ShareContent": {
+            shareCommentary: {
+              text: postText,
+            },
+            shareMediaCategory: "NONE",
+          },
+        },
+        visibility: {
+          "com.linkedin.ugc.MemberNetworkVisibility": visibility,
+        },
+      };
+
+      const _response = await this.sendPostRequest(postUrl, requestPayload);
+
+      return _response.data;
     } catch (error) {
       console.error(error);
       throw error;

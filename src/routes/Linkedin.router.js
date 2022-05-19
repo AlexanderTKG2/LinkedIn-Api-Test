@@ -48,4 +48,33 @@ router.post("/account-data", async (req, res) => {
   }
 });
 
+router.post("/simple-text-post", async (req, res) => {
+  try {
+    const accessToken = req.body.accessToken;
+    const postText = req.body.postText;
+
+    if (!(accessToken && postText)) {
+      res.status(400).json({ error: "bad request" });
+    }
+
+    const _accountIdResponse = await linkedInService.getAccountId(accessToken);
+    const accountId = _accountIdResponse;
+
+    const _postDataResponse = await linkedInService.linkedinTextPost(
+      accessToken,
+      accountId,
+      postText
+    );
+
+    res.status(200).json({
+      message: "post created",
+      status: "success",
+      postData: _postDataResponse,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+    res.end();
+  }
+});
+
 module.exports = router;
