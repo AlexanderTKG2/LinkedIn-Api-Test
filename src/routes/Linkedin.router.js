@@ -77,4 +77,36 @@ router.post("/simple-text-post", async (req, res) => {
   }
 });
 
+router.post("/simple-image-post", async (req, res) => {
+  try {
+    const accessToken = req.body.accessToken;
+    const postText = req.body.postText;
+
+    if (!(accessToken && postText)) {
+      res.status(400).json({ error: "bad request" });
+    }
+
+    const _accountIdResponse = await linkedInService.getAccountId(accessToken);
+    const accountId = _accountIdResponse;
+
+    if (!accountId) {
+      res.status(404).json({ error: "No account with Id found" });
+    }
+
+    const postResponse = await linkedInService.linkedInSingleImagePost(
+      accessToken,
+      accountId,
+      postText,
+      "/temp/img.jpg",
+      "test",
+      "test"
+    );
+
+    res.status(200).json({ status: "success", data: postResponse });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+    res.end();
+  }
+});
+
 module.exports = router;
