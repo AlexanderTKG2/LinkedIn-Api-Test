@@ -1,6 +1,8 @@
 const router = require("express").Router();
 const LinkedInService = require("@/src/services/Linkedin.service");
 const env = require("@/config/env");
+const multer = require("multer");
+const upload = multer();
 
 const linkedInService = new LinkedInService(
   env.linkedin.client_id,
@@ -77,11 +79,11 @@ router.post("/simple-text-post", async (req, res) => {
   }
 });
 
-router.post("/simple-image-post", async (req, res) => {
+router.post("/simple-image-post", upload.array("files"), async (req, res) => {
   try {
+    const files = req.files;
     const accessToken = req.body.accessToken;
     const postText = req.body.postText;
-
     if (!(accessToken && postText)) {
       res.status(400).json({ error: "bad request" });
     }
@@ -97,9 +99,7 @@ router.post("/simple-image-post", async (req, res) => {
       accessToken,
       accountId,
       postText,
-      "/temp/img.jpg",
-      "test",
-      "test"
+      files
     );
 
     res.status(200).json({ status: "success", data: postResponse });

@@ -115,9 +115,7 @@ class LinkedInService {
     accessToken,
     accountId,
     postText,
-    imageFilePath,
-    imageTitle,
-    imageDescription,
+    files,
     visibility = "PUBLIC"
   ) {
     try {
@@ -135,7 +133,6 @@ class LinkedInService {
               identifier: "urn:li:userGeneratedContent",
             },
           ],
-          supportedUploadMechanism: ["SYNCHRONOUS_UPLOAD"],
         },
       };
 
@@ -150,20 +147,15 @@ class LinkedInService {
         ].uploadUrl;
       const assetId = prepareResponse.data.value.asset;
 
-      console.log(uploadUrl);
-      console.log(assetId);
-
-      // Unimplemented
-      // TODO: upload file and create post
-
       const headers = {
         Authorization: "Bearer " + accessToken,
-        "Content-Type": "multipart/form-data",
-        "X-Restli-Protocol-VersionW": "2.0.0",
       };
 
-      const newFileStream = await fs.createReadStream(
-        path.join(process.cwd(), imageFilePath)
+      await this.sendPostRequest(
+        uploadUrl,
+        files[0].buffer,
+        "image/png",
+        headers
       );
 
       const postUrl =
@@ -183,30 +175,38 @@ class LinkedInService {
               {
                 status: "READY",
                 description: {
-                  text: imageDescription.substring(0, 200),
+                  text: "Center stage!",
                 },
                 media: assetId,
                 title: {
-                  text: imageTitle,
+                  text: "Glasshive image post example by Angelo",
                 },
               },
             ],
-            visibility: {
-              "com.linkedin.ugc.MemberNetworkVisibility": visibility,
-            },
           },
         },
+        visibility: {
+          "com.linkedin.ugc.MemberNetworkVisibility": visibility,
+        },
       };
+      const _response = await this.sendPostRequest(postUrl, postRequestPayload);
+      return _response.data;
     } catch (error) {
       console.error(error);
       throw error;
     }
   }
 
-  async sendPostRequest(url, payload, contentType = "application/json") {
+  async sendPostRequest(
+    url,
+    payload,
+    contentType = "application/json",
+    headers
+  ) {
     try {
       const response = await axios.post(url, payload, {
         headers: {
+          ...headers,
           "Content-Type": contentType,
         },
       });
