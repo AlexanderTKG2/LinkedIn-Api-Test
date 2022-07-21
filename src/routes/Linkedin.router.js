@@ -109,4 +109,34 @@ router.post("/simple-image-post", upload.array("files"), async (req, res) => {
   }
 });
 
+router.post("/video-post", upload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+    const accessToken = req.body.token;
+    const postText = req.body.postText || "Video Post";
+    const videoTitle = "Test Video";
+
+    const videoAssetUrnId = await linkedInService.uploadVideoAsset(
+      file,
+      accessToken
+    );
+
+    const _response = await linkedInService.createVideoPost(
+      videoAssetUrnId,
+      postText,
+      videoTitle,
+      accessToken
+    );
+
+    console.log("success");
+
+    res.status(200).json({
+      status: "Ok",
+      data: _response,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

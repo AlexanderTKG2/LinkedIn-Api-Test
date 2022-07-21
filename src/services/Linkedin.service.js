@@ -1,5 +1,6 @@
 const axios = require("axios").default;
-const DEFAULT_SCOPES = "r_emailaddress r_liteprofile w_member_social";
+const DEFAULT_SCOPES =
+  "r_organization_social rw_organization_admin r_emailaddress r_liteprofile r_ads rw_ads w_member_social w_organization_social";
 const fs = require("fs");
 const path = require("path");
 const FormData = require("form-data");
@@ -119,6 +120,8 @@ class LinkedInService {
     visibility = "PUBLIC"
   ) {
     try {
+      const preparedMedia = [];
+
       const prepareUrl =
         "https://api.linkedin.com/v2/assets?action=registerUpload&oauth2_access_token=" +
         accessToken;
@@ -136,27 +139,42 @@ class LinkedInService {
         },
       };
 
-      const prepareResponse = await this.sendPostRequest(
-        prepareUrl,
-        prepareRequestPayload
-      );
-
-      const uploadUrl =
-        prepareResponse.data.value.uploadMechanism[
-          "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
-        ].uploadUrl;
-      const assetId = prepareResponse.data.value.asset;
-
-      const headers = {
+      const uploadHeaders = {
         Authorization: "Bearer " + accessToken,
       };
 
-      await this.sendPostRequest(
-        uploadUrl,
-        files[0].buffer,
-        "image/png",
-        headers
-      );
+      for (const file of files) {
+        const prepareResponse = await this.sendPostRequest(
+          prepareUrl,
+          prepareRequestPayload
+        );
+
+        const uploadUrl =
+          prepareResponse.data.value.uploadMechanism[
+            "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
+          ].uploadUrl;
+        const assetId = prepareResponse.data.value.asset;
+
+        const responseImage = await this.sendPostRequest(
+          uploadUrl,
+          file.buffer,
+          "image/png",
+          uploadHeaders
+        );
+
+        preparedMedia.push({
+          status: "READY",
+          description: {
+            text: "New Post!",
+          },
+          media: assetId,
+          title: {
+            text: "Glasshive image post",
+          },
+        });
+      }
+
+      // console.log(responseImage);
 
       const postUrl =
         "https://api.linkedin.com/v2/ugcPosts?oauth2_access_token=" +
@@ -171,18 +189,7 @@ class LinkedInService {
               text: postText,
             },
             shareMediaCategory: "IMAGE",
-            media: [
-              {
-                status: "READY",
-                description: {
-                  text: "Center stage!",
-                },
-                media: assetId,
-                title: {
-                  text: "Glasshive image post example by Angelo",
-                },
-              },
-            ],
+            media: preparedMedia,
           },
         },
         visibility: {
@@ -191,6 +198,164 @@ class LinkedInService {
       };
       const _response = await this.sendPostRequest(postUrl, postRequestPayload);
       return _response.data;
+    } catch (error) {
+      console.error(error);
+      throw error;
+    }
+  }
+
+  async createVideoPost(videoAssetUrnId, postText, videoTitle, accessToken) {
+    try {
+      const personId = await this.getAccountId(accessToken);
+      const personOwnerUrn = `urn:li:person:${personId}`;
+
+      const videoPostCreationUrl = "https://api.linkedin.com/rest/posts";
+
+      const videoPostCreationRequestBody = {
+        author: personOwnerUrn,
+        commentary: postText,
+        visibility: "PUBLIC",
+        distribution: {
+          feedDistribution: "MAIN_FEED",
+          targetEntities: [],
+          thirdPartyDistributionChannels: [],
+        },
+        content: {
+          media: {
+            title: videoTitle,
+            id: videoAssetUrnId,
+          },
+        },
+        lifecycleState: "PUBLISHED",
+        isReshareDisabledByAuthor: false,
+      };
+
+      const postRequestContentType = "application/json";
+
+      const todayDateComponentsStr = new Date().toISOString().split("-");
+
+      // LinkedIn version: version number in the format YYYYMM
+      const linkedinVersion =
+        todayDateComponentsStr[0] + todayDateComponentsStr[1];
+
+      const postCreationAdditionalHeaders = {
+        Authorization: `Bearer ${accessToken}`,
+        "X-Restli-Protocol-Version": "2.0.0",
+        "LinkedIn-Version": linkedinVersion,
+      };
+
+      console.log("Creating post for video: " + videoAssetUrnId);
+
+      const postCreationResponse = await this.sendPostRequest(
+        videoPostCreationUrl,
+        videoPostCreationRequestBody,
+        postRequestContentType,
+        postCreationAdditionalHeaders
+      );
+
+      const newPostUgcUrnId = postCreationResponse.headers["x-restli-id"];
+
+      const newPostUgcUrl = `https://www.linkedin.com/feed/update/${newPostUgcUrnId}`;
+
+      const response = {
+        status: "Created",
+        postUrl: newPostUgcUrl,
+      };
+
+      return response;
+    } catch (error) {
+      console.error(error);
+      throw error;
+    }
+  }
+
+  async uploadVideoAsset(video, accessToken) {
+    try {
+      const personId = await this.getAccountId(accessToken);
+      const personOwnerUrn = `urn:li:person:${personId}`;
+      const size = video.size;
+
+      // Initialize video upload
+      const initUploadUrl =
+        "https://api.linkedin.com/rest/videos?action=initializeUpload";
+
+      const initUploadBody = {
+        initializeUploadRequest: {
+          owner: personOwnerUrn,
+          fileSizeBytes: size,
+          uploadCaptions: false,
+          uploadThumbnail: false,
+        },
+      };
+
+      const initUploadContentType = "application/json";
+
+      const today = new Date();
+      const todayDateComponentsStr = today.toISOString().split("-");
+
+      // LinkedIn version: version number in the format YYYYMM
+      const linkedinVersion =
+        todayDateComponentsStr[0] + todayDateComponentsStr[1];
+
+      const initUploadAdditionalHeaders = {
+        "LinkedIn-Version": linkedinVersion,
+        "X-RestLi-Protocol-Version": "2.0.0",
+        Authorization: "Bearer " + accessToken,
+      };
+
+      const initUploadResponse = await this.sendPostRequest(
+        initUploadUrl,
+        initUploadBody,
+        initUploadContentType,
+        initUploadAdditionalHeaders
+      );
+
+      const initResponseData = initUploadResponse.data; // Getting data from Axios Response object
+
+      // Upload Video to Linkedin
+
+      const videoUploadURL =
+        initResponseData["value"]["uploadInstructions"][0]["uploadUrl"];
+      const videoAssetUrnId = initResponseData["value"]["video"];
+
+      const videoUploadContentType = "application/octet-stream";
+
+      console.log("Uplaoding video");
+      const responseCreate = await this.sendPostRequest(
+        videoUploadURL,
+        video.buffer,
+        videoUploadContentType
+      );
+
+      const signedEtag = responseCreate.headers["etag"];
+
+      // Finalizing Upload
+
+      const finalizeUploadUrl =
+        "https://api.linkedin.com/rest/videos?action=finalizeUpload";
+
+      const finalizeUploadRequestBody = {
+        finalizeUploadRequest: {
+          video: videoAssetUrnId,
+          uploadToken: "",
+          uploadedPartIds: [signedEtag],
+        },
+      };
+
+      const finalizeUploadAdditionalHeaders = {
+        "LinkedIn-Version": linkedinVersion,
+        "X-RestLi-Protocol-Version": "2.0.0",
+        Authorization: `Bearer ${accessToken}`,
+      };
+
+      const finalizeResponse = await this.sendPostRequest(
+        finalizeUploadUrl,
+        finalizeUploadRequestBody,
+        "application/json",
+        finalizeUploadAdditionalHeaders
+      );
+
+      return videoAssetUrnId;
     } catch (error) {
       console.error(error);
       throw error;
