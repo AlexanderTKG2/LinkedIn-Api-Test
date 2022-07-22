@@ -3,6 +3,7 @@ const LinkedInService = require("@/src/services/Linkedin.service");
 const env = require("@/config/env");
 const multer = require("multer");
 const upload = multer();
+const fs = require("fs");
 
 const linkedInService = new LinkedInService(
   env.linkedin.client_id,

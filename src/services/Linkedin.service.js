@@ -314,20 +314,41 @@ class LinkedInService {
 
       // Upload Video to Linkedin
 
-      const videoUploadURL =
-        initResponseData["value"]["uploadInstructions"][0]["uploadUrl"];
       const videoAssetUrnId = initResponseData["value"]["video"];
 
+      const uploadInstructions =
+        initResponseData["value"]["uploadInstructions"];
       const videoUploadContentType = "application/octet-stream";
 
-      console.log("Uplaoding video");
-      const responseCreate = await this.sendPostRequest(
-        videoUploadURL,
-        video.buffer,
-        videoUploadContentType
-      );
+      const etagSignatures = [];
 
-      const signedEtag = responseCreate.headers["etag"];
+      const chunkHeaders = {
+        "LinkedIn-Version": linkedinVersion,
+        Authorization: "Bearer " + accessToken,
+      };
+      // Uploading video chunks
+      const buffer = video.buffer;
+      for (const chunkInstructions of uploadInstructions) {
+        const chunkUploadUrl = chunkInstructions.uploadUrl;
+
+        const startBytes = chunkInstructions.firstByte;
+        const endBytes = chunkInstructions.lastByte + 1;
+
+        const bufferChunk = buffer.subarray(startBytes, endBytes);
+
+        console.log(`Uploading chunk in range: ${startBytes} - ${endBytes}`);
+
+        const responseCreate = await this.sendPostRequest(
+          chunkUploadUrl,
+          bufferChunk,
+          videoUploadContentType,
+          chunkHeaders
+        );
+
+        const signedEtag = responseCreate.headers["etag"];
+
+        etagSignatures.push(signedEtag);
+      }
 
       // Finalizing Upload
 
@@ -338,7 +359,7 @@ class LinkedInService {
         finalizeUploadRequest: {
           video: videoAssetUrnId,
           uploadToken: "",
-          uploadedPartIds: [signedEtag],
+          uploadedPartIds: etagSignatures,
         },
       };
 
@@ -358,6 +379,196 @@ class LinkedInService {
       return videoAssetUrnId;
     } catch (error) {
       console.error(error);
+      throw error;
+    }
+  }
+
+  async awaitFileAssemblyCompletion(
+    fileUrn,
+    accessToken,
+    linkedinVersion,
+    fileSize
+  ) {
+    try {
+      const MAX_NUMBER_OF_ATTEMPTS = 6;
+      let fileStatus = "PROCESSING";
+      let attemptCounter = 0;
+
+      const requestHeaders = {
+        "LinkedIn-Version": linkedinVersion,
+        Authorization: `Bearer ${accessToken}`,
+      };
+
+      const SIZE_TO_MS_PROPORTION = 1000;
+
+      const interval = 20000; //Math.round(fileSize / SIZE_TO_MS_PROPORTION);
+      console.log("await interval: " + interval);
+
+      while (
+        fileStatus !== "AVAILABLE" &&
+        attemptCounter <= MAX_NUMBER_OF_ATTEMPTS
+      ) {
+        const remoteResponse = await this.getFileStatusWithTimeout(
+          fileUrn,
+          requestHeaders,
+          interval
+        );
+        fileStatus = remoteResponse.status;
+        console.log(fileStatus);
+        attemptCounter++;
+      }
+
+      if (
+        attemptCounter > MAX_NUMBER_OF_ATTEMPTS &&
+        fileStatus !== "AVAILABLE"
+      ) {
+        return "TIMED_OUT";
+      }
+      return fileStatus;
+    } catch (error) {
+      console.log(error.message);
+      throw error;
+    }
+  }
+
+  async getFileStatusWithTimeout(fileUrn, requestHeaders, interval) {
+    return new Promise((resolve, reject) => {
+      setTimeout(async () => {
+        try {
+          const statusRequestURl =
+            "https://api.linkedin.com/rest/videos/" + fileUrn;
+
+          const response = await this.sendGetRequest(
+            statusRequestURl,
+            "application/json",
+            requestHeaders
+          );
+
+          resolve(response.data);
+        } catch (error) {
+          return reject(error);
+        }
+      }, interval);
+    });
+  }
+
+  // Vector assets API
+  async multipartVideoUploadDeprecated(video, accessToken) {
+    try {
+      // Register upload for video (Vector Asset)
+
+      const personId = await this.getAccountId(accessToken);
+      const personOwnerUrn = `urn:li:person:${personId}`;
+
+      const today = new Date();
+      const todayDateComponentsStr = today.toISOString().split("-");
+
+      // LinkedIn version: version number in the format YYYYMM
+      const linkedinVersion =
+        todayDateComponentsStr[0] + todayDateComponentsStr[1];
+
+      const registerUploadUrl =
+        "https://api.linkedin.com/rest/assets?action=registerUpload"; // POST
+
+      const registerUploadPayload = {
+        registerUploadRequest: {
+          owner: personOwnerUrn,
+          recipes: ["urn:li:digitalmediaRecipe:feedshare-video"],
+          serviceRelationships: [
+            {
+              identifier: "urn:li:userGeneratedContent",
+              relationshipType: "OWNER",
+            },
+          ],
+          supportedUploadMechanism: ["MULTIPART_UPLOAD"],
+          fileSize: video.size,
+        },
+      };
+
+      const registerUploadAdditionalHeaders = {
+        "LinkedIn-Version": linkedinVersion,
+        Authorization: `Bearer ${accessToken}`,
+        "X-Restli-Protocol-Version": "2.0.0",
+      };
+
+      const prepareAssetResponseRaw = await this.sendPostRequest(
+        registerUploadUrl,
+        registerUploadPayload,
+        "application/json",
+        registerUploadAdditionalHeaders
+      );
+
+      const prepareAssetResponse = prepareAssetResponseRaw.data;
+
+      const uploadRequestsArray =
+        prepareAssetResponse["value"]["uploadMechanism"][
+          "com.linkedin.digitalmedia.uploading.MultipartUpload"
+        ]["partUploadRequests"];
+
+      const mediaUploadMetadata =
+        prepareAssetResponse["value"]["uploadMechanism"][
+          "com.linkedin.digitalmedia.uploading.MultipartUpload"
+        ]["metadata"];
+
+      const mediaAsset = prepareAssetResponse["value"]["asset"];
+      const mediaArtifact = prepareAssetResponse["value"]["mediaArtifact"];
+      // Start multipart upload
+
+      const _partUploadresponses = [];
+      const etagSignatures = [];
+      for (const uploadConfigItem of uploadRequestsArray) {
+        const buffer = video.buffer;
+        const partUploadUrl = uploadConfigItem["url"];
+        const chunkStart = uploadConfigItem["byteRange"]["firstByte"];
+        const chunkEnd = uploadConfigItem["byteRange"]["lastByte"] + 1;
+
+        const chunkPayload = buffer.subarray(chunkStart, chunkEnd);
+        const uploadChunkResponseRaw = await this.sendPostRequest(
+          partUploadUrl,
+          chunkPayload,
+          uploadConfigItem["headers"]["Content-Type"]
+        );
+
+        const uploadChunkResponse = uploadChunkResponseRaw.data;
+        // const signedEtag = uploadChunkResponse.headers["ETag"];
+        const partUploadResponseData = {
+          headers: {
+            ETag: uploadChunkResponseRaw.headers["etag"],
+          },
+          httpStatusCode: 200,
+        };
+
+        etagSignatures.push(uploadChunkResponseRaw.headers["etag"]);
+
+        _partUploadresponses.push(partUploadResponseData);
+      }
+
+      // Complete multipart upload
+
+      const completeUploadUrl =
+        "https://api.linkedin.com/rest/assets?action=completeMultiPartUpload";
+
+      const completeUploadPayload = {
+        completeMultipartUploadRequest: {
+          mediaArtifact: mediaArtifact,
+          metadata: mediaUploadMetadata,
+          partUploadResponses: _partUploadresponses,
+        },
+      };
+
+      const finalizeResponse = await this.sendPostRequest(
+        completeUploadUrl,
+        completeUploadPayload,
+        "application/json",
+        registerUploadAdditionalHeaders
+      );
+
+      return {
+        assetId: mediaAsset,
+        artifactId: mediaArtifact,
+      };
+    } catch (error) {
+      console.log(error.message);
       throw error;
     }
   }
@@ -383,11 +594,12 @@ class LinkedInService {
     }
   }
 
-  async sendGetRequest(url, contentType = "*/*") {
+  async sendGetRequest(url, contentType = "*/*", additionalHeaders = {}) {
     try {
       const response = await axios.get(url, {
         headers: {
           "Content-Type": contentType,
+          ...additionalHeaders,
         },
       });
       return response;
